@@ -25,14 +25,16 @@ Public Class parseXML
             ElseIf xname.Contains("derivative") Then
                 loadStr = parseDerivative(proc_Derivative(x, xname))
             ElseIf xname.Contains("rule4") Then
-                loadStr = parseRule4(proc_Rule4(x, xname)) & r4foot
+                loadStr = parseRule4(proc_Rule4(x, xname))
             End If
 
             'Create the Text file
             File.WriteAllText(Module1.writePath & "\Txtfiles\" &
                   Format(Now, "yyyyMMddhhss") & "_" & xname & ".txt", loadStr)
             'Load into the Database 
-            DoTRS.doIns(loadStr, Module1.dbconn)
+            If Not loadStr = "" Then
+                DoTRS.doIns(loadStr, Module1.dbconn)
+            End If
         Catch ex As Exception
             LogQueue.Enqueue("e - " & ex.ToString)
         End Try
@@ -326,6 +328,8 @@ Public Class parseXML
                 testInt(race.EachWayReduction) & "," &
                 testInt(race.NumberOfPlaces) & "," &
                 testDate(race.DisplayTime) & "," &
+                testInt(race.NumberOfFences) & "," &
+                testStr(race.GlobalClass) & "," &
             testDate(Now()) & "),"
         Catch ex As Exception
             LogQueue.Enqueue("e" & " " & ex.ToString())
@@ -448,7 +452,25 @@ Public Class parseXML
                 0 & "," &
                 testStr(horse.LastTimeAtTrackAndDistance) & "," &
                 testStr(horse.JockeySilksURL) & "," &
-                testStr(horse.scratched_indicator) & "," & testDate(Now()) & "),"
+                testStr(horse.scratched_indicator) & "," &
+                testInt(horse.DaysSinceLastRun) & "," &
+                testInt(horse.DaysSinceLastRunFlat) & "," &
+                testInt(horse.DaysSinceLastRunJumps) & "," &
+                testInt(horse.OfficialRating) & "," &
+                testInt(horse.OfficialRatingToday) & "," &
+                testStr(horse.CourseDistanceWinner) & "," &
+                testStr(horse.CourseDistanceWins) & "," &
+                testInt(horse.CourseWins) & "," &
+                testInt(horse.MorningLine) & ","
+
+            If horse.RunnerComments Is Nothing Then
+                retstr = retstr & "'','',"
+            Else
+                retstr = retstr & testStr(horse.RunnerComments().ElementAt(0).RunnerComment.Replace("'", "").Replace(",", "")) & "," &
+                               testStr(horse.RunnerComments().ElementAt(0).Source.ToString) & ","
+            End If
+
+            retstr = retstr & testDate(Now()) & "),"
         Catch ex As Exception
             LogQueue.Enqueue("e" & " " & ex.ToString())
         End Try
@@ -677,11 +699,12 @@ Public Class parseXML
             Dim upprice As String = "Insert into gbs.prices_live values "
             If Not price Is Nothing Then
                 If Not price.Runners Is Nothing Then
-                    retprice = retprice & "Insert into gbs.prices_values values "
-                    'Runner prices loop
-                    For Each run As RunnerPriceData In price.Runners()
-                        Try
-                            retprice = retprice & "(0," & testInt(price.MeetingID) & "," &
+                    If price.Runners.Length > 0 Then
+                        retprice = retprice & "Insert into gbs.prices_values values "
+                        'Runner prices loop
+                        For Each run As RunnerPriceData In price.Runners()
+                            Try
+                                retprice = retprice & "(0," & testInt(price.MeetingID) & "," &
                                             testInt(price.RaceNo) & "," &
                                             testInt(price.Source) & "," &
                                             testInt(price.PriceType) & "," &
@@ -691,7 +714,7 @@ Public Class parseXML
                                            "'0'," &
                                             testDate(Now) & "),"
 
-                            upprice = upprice & "(" & testInt(price.MeetingID) & "," &
+                                upprice = upprice & "(" & testInt(price.MeetingID) & "," &
                                                 testInt(price.RaceNo) & "," &
                                                 testInt(run.TabNo) & "," &
                                                 testInt(price.Source) & "," &
@@ -699,19 +722,19 @@ Public Class parseXML
                                                 testStr(run.Price) & "," &
                                                 testDate(Now) & ",0.0),"
 
-                        Catch ex As Exception
-                            LogQueue.Enqueue("e" & " " & ex.ToString())
-                        End Try
-                    Next
-                    upprice = upprice.Substring(0, upprice.LastIndexOf(",")) & " on duplicate key update
+                            Catch ex As Exception
+                                LogQueue.Enqueue("e" & " " & ex.ToString())
+                            End Try
+                        Next
+                        upprice = upprice.Substring(0, upprice.LastIndexOf(",")) & " on duplicate key update
                         prices_live.prev = case when prices_live.price != values(price) then prices_live.price else prices_live.prev end,
                         prices_live.updated = case when prices_live.price != values(price) then values(updated) else prices_live.updated end,
                         prices_live.price = case when prices_live.price != values(price) then values(price) else prices_live.price end;
                         "
-                    retprice = retprice.Substring(0, retprice.LastIndexOf(",")) & ";" & upprice
-
+                        retprice = retprice.Substring(0, retprice.LastIndexOf(",")) & ";" & upprice
+                    End If
                 End If
-            End If
+                End If
         Catch ex As Exception
             LogQueue.Enqueue("e" & " " & ex.ToString())
         End Try
@@ -835,12 +858,14 @@ Public Class parseXML
     Public Shared Function parseRule4(ByVal rule4 As Meetings.Rule4)
         Dim retprice As String = ""
         Dim r4header As String = ""
+        Dim r4mainheader As String = ""
         Dim r4ded As String = ""
         Try
-            r4header = "Insert into gbs.rule4 values "
-            r4header = r4header & "(" & testInt(rule4.MeetingID) & "," &
+            r4mainheader = "Insert into gbs.rule4 values "
+            r4header = "(" & testInt(rule4.MeetingID) & "," &
                 testInt(rule4.RaceNumber) & "," &
-                testStr(rule4.DeductionType.ToString()) & ","
+                testStr(rule4.DeductionType.ToString()) & "," &
+                testStr(rule4.MeetingSource.ToString()) & ","
 
             For Each r In rule4.Deductions()
                 r4ded = testDate(r.FromTime) & "," &
@@ -851,16 +876,17 @@ Public Class parseXML
                     testInt(run.Number) & "," &
                         testStr(run.Name) & "," &
                         testInt(run.Deduction) & "," &
-                        testDec(run.Price) & ");"
+                        testDec(run.Price) & "),"
                 Next
                 For Each arun In r.ActiveRunner
                     retprice = retprice & r4header & r4ded & "'Active'" & "," &
                         testInt(arun.Number) & "," &
                         testStr(arun.Name) & ",0," &
-                        testDec(arun.Price) & ");"
+                        testDec(arun.Price) & "),"
                 Next
             Next
             'Add code here
+            retprice = r4mainheader & retprice.Substring(0, retprice.LastIndexOf(",")) & " " & r4foot
         Catch ex As Exception
             LogQueue.Enqueue("e" & " " & ex.ToString())
         End Try
